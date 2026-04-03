@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+checkpoints/
+runs/
+outputs/
+*.pt
+*.pth
+*.ckpt
+.DS_Store
+datasets/

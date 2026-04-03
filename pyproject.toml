@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "turbulence-restoration"
+version = "0.1.0"
+description = "GPU turbulence simulator and time-aware multi-frame restoration model"
+requires-python = ">=3.9"
+dependencies = [
+  "torch>=2.1",
+  "numpy>=1.23",
+  "PyYAML>=6.0",
+  "tqdm>=4.66",
+  "opencv-python>=4.8",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["turbulence_restoration*"]

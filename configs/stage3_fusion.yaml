@@ -1,0 +1,32 @@
+stage: fusion
+epochs: 20
+batch_size: 2
+num_workers: 2
+lr: 0.0001
+weight_decay: 0.0001
+amp: true
+out_dir: checkpoints/stage3_fusion
+
+model:
+  c0: 32
+  c1: 64
+  c2: 128
+  use_time: true
+
+simulator:
+  severity: medium
+
+data:
+  num_samples: 1000
+  num_clean_frames: 40
+  image_size: 256
+  fps: 60.0
+  temporal_policy: k9_200ms
+
+loss:
+  edge: 0.05
+
+aux_weights:
+  align: 0.0
+  smooth: 0.01
+  oracle: 0.05
