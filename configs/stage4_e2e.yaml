@@ -8,25 +8,25 @@ amp: true
 out_dir: checkpoints/stage4_e2e
 
 model:
-  c0: 32
-  c1: 64
-  c2: 128
-  use_time: true
+    c0: 32
+    c1: 64
+    c2: 128
+    use_time: true
 
 simulator:
-  severity: medium
+    severity: medium
 
 data:
-  num_samples: 2000
-  num_clean_frames: 40
-  image_size: 256
-  fps: 60.0
-  temporal_policy: k9_200ms
+    train_root: datasets/clean/train
+    val_root: datasets/clean/val
+    crop_size: 256
+    fps: 24.0
+    temporal_policy: k9_200ms
 
 loss:
-  edge: 0.05
+    edge: 0.05
 
 aux_weights:
-  align: 0.0
-  smooth: 0.01
-  oracle: 0.0
+    align: 0.0
+    smooth: 0.01
+    oracle: 0.0

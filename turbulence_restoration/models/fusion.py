@@ -35,7 +35,7 @@ class TemporalFusionLevel(nn.Module):
             score = score + self.time_score(dt.reshape(B * K, 1)).reshape(B, K, 1, 1, 1)
 
         mask = valid_mask.reshape(B, K, 1, 1, 1)
-        score = score.masked_fill(mask < 0.5, -1e9)
+        score = score.masked_fill(mask < 0.5, torch.finfo(score.dtype).min)
         weights = torch.softmax(score, dim=1)
         fused = torch.sum(weights * aligned, dim=1)
         return fused, weights
