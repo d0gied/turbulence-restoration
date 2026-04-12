@@ -9,3 +9,9 @@ outputs/
 *.ckpt
 .DS_Store
 datasets/
+*.egg-info/
+*.mp4
+*.avi
+*.zip
+docs/
+results/
