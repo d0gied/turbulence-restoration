@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import List, Optional, Sequence
 
@@ -8,7 +9,11 @@ import cv2
 import torch
 from tqdm import tqdm
 
-from turbulence_restoration.data.dataset import FRAME_CACHE_FORMAT, IMAGE_EXTENSIONS
+from turbulence_restoration.data.dataset import (
+    FRAME_CACHE_FORMAT,
+    FRAME_CACHE_INDEX_FILENAME,
+    IMAGE_EXTENSIONS,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT_ROOT = REPO_ROOT / "datasets" / "clean_videos"
@@ -137,17 +142,15 @@ def read_video_frames(
     return torch.stack(frame_tensors, dim=0), filenames, original_shapes, resized_shapes
 
 
-def write_cache(
-    *,
+def make_cache_payload(
     root: Path,
-    output: Path,
     payload_videos: list[dict],
     total_frames: int,
     total_bytes: int,
     max_width: int,
     max_height: int,
-) -> None:
-    payload = {
+) -> dict:
+    return {
         "format": FRAME_CACHE_FORMAT,
         "root": str(root),
         "layout": "NCHW_RGB_UINT8",
@@ -158,6 +161,26 @@ def write_cache(
         "num_bytes": total_bytes,
         "videos": payload_videos,
     }
+
+
+def write_cache(
+    *,
+    root: Path,
+    output: Path,
+    payload_videos: list[dict],
+    total_frames: int,
+    total_bytes: int,
+    max_width: int,
+    max_height: int,
+) -> None:
+    payload = make_cache_payload(
+        root=root,
+        payload_videos=payload_videos,
+        total_frames=total_frames,
+        total_bytes=total_bytes,
+        max_width=max_width,
+        max_height=max_height,
+    )
 
     output.parent.mkdir(parents=True, exist_ok=True)
     torch.save(payload, output)
@@ -171,11 +194,78 @@ def write_cache(
     )
 
 
+def write_grouped_video_cache(
+    *,
+    root: Path,
+    output_dir: Path,
+    video: dict,
+    max_width: int,
+    max_height: int,
+) -> dict:
+    frames = video["frames"]
+    video_frames = int(frames.shape[0])
+    video_bytes = int(frames.numel() * frames.element_size())
+    payload = make_cache_payload(
+        root=root,
+        payload_videos=[video],
+        total_frames=video_frames,
+        total_bytes=video_bytes,
+        max_width=max_width,
+        max_height=max_height,
+    )
+    output = output_dir / f"{Path(str(video['name'])).name}.pt"
+    torch.save(payload, output)
+    return {
+        "file": output.name,
+        "name": str(video["name"]),
+        "filenames": [str(filename) for filename in video.get("filenames", [])],
+        "frames": video_frames,
+        "bytes": video_bytes,
+    }
+
+
+def write_grouped_cache_index(
+    *,
+    root: Path,
+    output_dir: Path,
+    index_videos: list[dict],
+    total_frames: int,
+    total_bytes: int,
+) -> None:
+    index = {
+        "format": FRAME_CACHE_FORMAT,
+        "root": str(root),
+        "layout": "grouped_by_video",
+        "num_videos": len(index_videos),
+        "num_frames": total_frames,
+        "num_bytes": total_bytes,
+        "videos": index_videos,
+    }
+    with (output_dir / FRAME_CACHE_INDEX_FILENAME).open("w", encoding="utf-8") as f:
+        json.dump(index, f, indent=2)
+        f.write("\n")
+
+    print(
+        {
+            "output": str(output_dir),
+            "videos": len(index_videos),
+            "frames": total_frames,
+            "raw_gib": round(total_bytes / 1024**3, 2),
+            "grouped_by": "video",
+        }
+    )
+
+
 def build_cache_from_frame_folders(root: Path, output: Path, max_width: int, max_height: int) -> None:
     videos = discover_frame_videos(root)
     payload_videos = []
+    index_videos = []
     total_frames = 0
     total_bytes = 0
+    grouped_output = output.suffix != ".pt"
+
+    if grouped_output:
+        output.mkdir(parents=True, exist_ok=True)
 
     for frame_paths in tqdm(videos, desc=f"cache {root.name}"):
         frame_tensors = []
@@ -194,25 +284,44 @@ def build_cache_from_frame_folders(root: Path, output: Path, max_width: int, max
         frames = torch.stack(frame_tensors, dim=0)
         total_frames += int(frames.shape[0])
         total_bytes += int(frames.numel() * frames.element_size())
-        payload_videos.append(
-            {
-                "name": frame_paths[0].parent.name,
-                "filenames": [path.name for path in frame_paths],
-                "original_shapes": original_shapes,
-                "resized_shapes": resized_shapes,
-                "frames": frames,
-            }
-        )
+        video = {
+            "name": frame_paths[0].parent.name,
+            "filenames": [path.name for path in frame_paths],
+            "original_shapes": original_shapes,
+            "resized_shapes": resized_shapes,
+            "frames": frames,
+        }
+        if grouped_output:
+            index_videos.append(
+                write_grouped_video_cache(
+                    root=root,
+                    output_dir=output,
+                    video=video,
+                    max_width=max_width,
+                    max_height=max_height,
+                )
+            )
+        else:
+            payload_videos.append(video)
 
-    write_cache(
-        root=root,
-        output=output,
-        payload_videos=payload_videos,
-        total_frames=total_frames,
-        total_bytes=total_bytes,
-        max_width=max_width,
-        max_height=max_height,
-    )
+    if grouped_output:
+        write_grouped_cache_index(
+            root=root,
+            output_dir=output,
+            index_videos=index_videos,
+            total_frames=total_frames,
+            total_bytes=total_bytes,
+        )
+    else:
+        write_cache(
+            root=root,
+            output=output,
+            payload_videos=payload_videos,
+            total_frames=total_frames,
+            total_bytes=total_bytes,
+            max_width=max_width,
+            max_height=max_height,
+        )
 
 
 def build_cache_from_video_files(
@@ -225,8 +334,13 @@ def build_cache_from_video_files(
     video_digits: int,
 ) -> None:
     payload_videos = []
+    index_videos = []
     total_frames = 0
     total_bytes = 0
+    grouped_output = output.suffix != ".pt"
+
+    if grouped_output:
+        output.mkdir(parents=True, exist_ok=True)
 
     for offset, video_path in enumerate(tqdm(video_paths, desc=f"cache {split_dir.name}")):
         frames, filenames, original_shapes, resized_shapes = read_video_frames(
@@ -237,32 +351,56 @@ def build_cache_from_video_files(
         total_frames += int(frames.shape[0])
         total_bytes += int(frames.numel() * frames.element_size())
         video_index = start_index + offset
-        payload_videos.append(
-            {
-                "name": f"video_{video_index:0{video_digits}d}",
-                "source": str(video_path),
-                "filenames": filenames,
-                "original_shapes": original_shapes,
-                "resized_shapes": resized_shapes,
-                "frames": frames,
-            }
-        )
+        video = {
+            "name": f"video_{video_index:0{video_digits}d}",
+            "source": str(video_path),
+            "filenames": filenames,
+            "original_shapes": original_shapes,
+            "resized_shapes": resized_shapes,
+            "frames": frames,
+        }
+        if grouped_output:
+            index_videos.append(
+                write_grouped_video_cache(
+                    root=split_dir,
+                    output_dir=output,
+                    video=video,
+                    max_width=max_width,
+                    max_height=max_height,
+                )
+            )
+        else:
+            payload_videos.append(video)
 
-    write_cache(
-        root=split_dir,
-        output=output,
-        payload_videos=payload_videos,
-        total_frames=total_frames,
-        total_bytes=total_bytes,
-        max_width=max_width,
-        max_height=max_height,
-    )
+    if grouped_output:
+        write_grouped_cache_index(
+            root=split_dir,
+            output_dir=output,
+            index_videos=index_videos,
+            total_frames=total_frames,
+            total_bytes=total_bytes,
+        )
+    else:
+        write_cache(
+            root=split_dir,
+            output=output,
+            payload_videos=payload_videos,
+            total_frames=total_frames,
+            total_bytes=total_bytes,
+            max_width=max_width,
+            max_height=max_height,
+        )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Pack clean videos or frame folders into torch uint8 cache files.")
     parser.add_argument("--root", type=Path, default=None, help="Legacy frame-folder root, e.g. datasets/clean/train")
-    parser.add_argument("--output", type=Path, default=None, help="Output .pt path for --root mode")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output path for --root mode. Use a .pt file for monolithic cache or a directory for per-video cache.",
+    )
     parser.add_argument(
         "--input-root",
         type=Path,
@@ -337,7 +475,7 @@ def main() -> None:
             print(f"{split_name}: no video files found, skipping")
             continue
 
-        output = output_root / f"clean_{split_name}.pt"
+        output = output_root / f"clean_{split_name}"
         build_cache_from_video_files(
             split_dir=split_dir,
             output=output,

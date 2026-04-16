@@ -20,8 +20,8 @@ simulator:
 data:
     train_root: datasets/clean/train
     val_root: datasets/clean/val
-    train_cache: datasets/cache/clean_train.pt
-    val_cache: datasets/cache/clean_val.pt
+    train_cache: datasets/cache/clean_train
+    val_cache: datasets/cache/clean_val
     crop_size: 240
     fps: 24.0
     temporal_policy: k9_200ms
