@@ -1,0 +1,51 @@
+stage: temporal_finetune
+epochs: 10
+batch_size: 1
+num_workers: 0
+lr: 0.00001
+weight_decay: 0.0001
+amp: true
+out_dir: checkpoints/stage5_temporal
+
+model:
+    c0: 32
+    c1: 64
+    c2: 128
+    use_time: true
+
+simulator:
+    severity: weak
+    on_device: true
+    train_mix:
+        clean_probability: 0.20
+        low_probability: 0.30
+        low_severity: very_weak
+        granularity: clip
+
+data:
+    train_root: datasets/clean/train
+    val_root: datasets/clean/val
+    train_cache: datasets/cache/clean_train.pt
+    val_cache: datasets/cache/clean_val.pt
+    crop_size: 240
+    fps: 24.0
+    temporal_policy: k9_200ms
+    preload: true
+
+sequence:
+    output_frames: 5
+    center_stride: 1
+
+loss:
+    rec: 1.0
+    edge: 0.05
+    temporal_velocity: 0.05
+    temporal_acceleration: 0.10
+    residual_acceleration: 0.05
+    weight_smoothness: 0.005
+    temporal_lowpass_scale: 2
+
+aux_weights:
+    align: 0.0
+    smooth: 0.01
+    oracle: 0.0

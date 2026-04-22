@@ -55,6 +55,76 @@ class RestorationLoss(nn.Module):
         return loss, {"pix": pix.detach(), "edge": edge.detach()}
 
 
+def charbonnier(x: torch.Tensor, eps: float = 1e-3) -> torch.Tensor:
+    return torch.mean(torch.sqrt(x * x + eps * eps))
+
+
+def lowpass_seq(x: torch.Tensor, scale: int = 2) -> torch.Tensor:
+    """
+    x: [B,S,C,H,W]. Spatial low-pass keeps temporal losses focused on visible jitter.
+    """
+    if x.dim() != 5:
+        raise ValueError(f"Expected sequence tensor [B,S,C,H,W], got {tuple(x.shape)}")
+
+    B, S, C, H, W = x.shape
+    y = x.reshape(B * S, C, H, W)
+    if scale > 1 and H >= scale and W >= scale:
+        y = F.avg_pool2d(y, kernel_size=int(scale), stride=int(scale))
+
+    _, _, h, w = y.shape
+    return y.reshape(B, S, C, h, w)
+
+
+def temporal_velocity_loss(
+    pred_seq: torch.Tensor,
+    target_seq: torch.Tensor,
+    lowpass_scale: int = 2,
+) -> torch.Tensor:
+    if pred_seq.shape[1] < 2:
+        return pred_seq.new_zeros(())
+
+    pred_lp = lowpass_seq(pred_seq, lowpass_scale)
+    target_lp = lowpass_seq(target_seq, lowpass_scale)
+    pred_delta = pred_lp[:, 1:] - pred_lp[:, :-1]
+    target_delta = target_lp[:, 1:] - target_lp[:, :-1]
+    return charbonnier(pred_delta - target_delta)
+
+
+def temporal_acceleration_loss(
+    pred_seq: torch.Tensor,
+    target_seq: torch.Tensor,
+    lowpass_scale: int = 2,
+) -> torch.Tensor:
+    if pred_seq.shape[1] < 3:
+        return pred_seq.new_zeros(())
+
+    pred_lp = lowpass_seq(pred_seq, lowpass_scale)
+    target_lp = lowpass_seq(target_seq, lowpass_scale)
+    pred_acc = pred_lp[:, 2:] - 2.0 * pred_lp[:, 1:-1] + pred_lp[:, :-2]
+    target_acc = target_lp[:, 2:] - 2.0 * target_lp[:, 1:-1] + target_lp[:, :-2]
+    return charbonnier(pred_acc - target_acc)
+
+
+def residual_acceleration_loss(
+    pred_seq: torch.Tensor,
+    input_center_seq: torch.Tensor,
+    lowpass_scale: int = 2,
+) -> torch.Tensor:
+    if pred_seq.shape[1] < 3:
+        return pred_seq.new_zeros(())
+
+    residual = pred_seq - input_center_seq
+    residual_lp = lowpass_seq(residual, lowpass_scale)
+    residual_acc = residual_lp[:, 2:] - 2.0 * residual_lp[:, 1:-1] + residual_lp[:, :-2]
+    return charbonnier(residual_acc)
+
+
+def fusion_weight_smoothness_loss(weights_seq: torch.Tensor) -> torch.Tensor:
+    if weights_seq.shape[1] < 2:
+        return weights_seq.new_zeros(())
+    return charbonnier(weights_seq[:, 1:] - weights_seq[:, :-1])
+
+
 def flow_smoothness_loss(flow: torch.Tensor) -> torch.Tensor:
     dx = torch.abs(flow[:, :, :, 1:] - flow[:, :, :, :-1]).mean()
     dy = torch.abs(flow[:, :, 1:, :] - flow[:, :, :-1, :]).mean()

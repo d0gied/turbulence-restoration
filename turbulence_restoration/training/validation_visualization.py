@@ -65,6 +65,26 @@ def make_rgb_grid(frames: torch.Tensor, cols: int = 0, pad: int = 4) -> np.ndarr
     return tile_images([rgb_tensor_to_uint8(frame) for frame in frames], cols=cols, pad=pad)
 
 
+def make_scalar_grid(values: torch.Tensor, vmin: float, vmax: float, cols: int = 0, pad: int = 4) -> np.ndarray:
+    if values.dim() != 3:
+        raise ValueError(f"Expected scalar maps [K,H,W], got {tuple(values.shape)}")
+    return tile_images([scalar_to_colormap(value, vmin=vmin, vmax=vmax) for value in values], cols=cols, pad=pad)
+
+
+def make_flow_magnitude_grid(flow: torch.Tensor, cols: int = 0, pad: int = 4) -> np.ndarray:
+    if flow.dim() != 4 or flow.shape[1] != 2:
+        raise ValueError(f"Expected flow [K,2,H,W], got {tuple(flow.shape)}")
+    magnitude = torch.linalg.vector_norm(flow, dim=1)
+    vmax = max(float(magnitude.quantile(0.99).item()), 1e-6)
+    return make_scalar_grid(magnitude, vmin=0.0, vmax=vmax, cols=cols, pad=pad)
+
+
+def make_weight_grid(weights: torch.Tensor, cols: int = 0, pad: int = 4) -> np.ndarray:
+    if weights.dim() != 4 or weights.shape[1] != 1:
+        raise ValueError(f"Expected weights [K,1,H,W], got {tuple(weights.shape)}")
+    return make_scalar_grid(weights[:, 0], vmin=0.0, vmax=1.0, cols=cols, pad=pad)
+
+
 def make_captioned_tile(image_rgb: np.ndarray, caption: str, header_h: int = 26) -> np.ndarray:
     height, width, _ = image_rgb.shape
     canvas = np.full((height + header_h, width, 3), 255, dtype=np.uint8)
@@ -113,6 +133,8 @@ class ValidationVisualizer:
         self.num_samples = int(num_samples)
         self.grid_cols = int(grid_cols)
         self.sequence_images: list[np.ndarray] = []
+        self.flow_images: list[np.ndarray] = []
+        self.weight_images: list[np.ndarray] = []
         self.summary_rows: list[np.ndarray] = []
         self.samples: list[Dict[str, Any]] = []
         self.psnr_values: list[float] = []
@@ -127,6 +149,7 @@ class ValidationVisualizer:
         pred: torch.Tensor,
         batch_psnr: torch.Tensor,
         batch_ssim: torch.Tensor,
+        aux: Dict[str, torch.Tensor] | None = None,
     ) -> None:
         for i in range(pred.shape[0]):
             if self.is_full():
@@ -142,6 +165,10 @@ class ValidationVisualizer:
             }
 
             self.sequence_images.append(make_rgb_grid(sample_frames, cols=self.grid_cols))
+            if aux is not None and "flow0" in aux:
+                self.flow_images.append(make_flow_magnitude_grid(aux["flow0"][i].detach().cpu(), cols=self.grid_cols))
+            if aux is not None and "weights0" in aux:
+                self.weight_images.append(make_weight_grid(aux["weights0"][i].detach().cpu(), cols=self.grid_cols))
             self.summary_rows.append(make_summary_row(sample_frames, sample_pred, sample_target, sample_metrics))
             self.samples.append(
                 {
@@ -184,6 +211,10 @@ class ValidationVisualizer:
         out_dir.mkdir(parents=True, exist_ok=True)
         for idx, image in enumerate(self.sequence_images):
             write_rgb_png(out_dir / f"sample_{idx:02d}_sequence.png", image, png_compression)
+        for idx, image in enumerate(self.flow_images):
+            write_rgb_png(out_dir / f"sample_{idx:02d}_flow_magnitude.png", image, png_compression)
+        for idx, image in enumerate(self.weight_images):
+            write_rgb_png(out_dir / f"sample_{idx:02d}_fusion_weights.png", image, png_compression)
 
         write_rgb_png(out_dir / "summary.png", self.summary_image(), png_compression)
         payload = self.metrics_payload(extra=extra)

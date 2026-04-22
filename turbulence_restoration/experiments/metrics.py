@@ -42,3 +42,27 @@ def ssim(pred: torch.Tensor, target: torch.Tensor, window_size: int = 11, sigma:
     c2 = 0.03 ** 2
     ssim_map = ((2 * mu12 + c1) * (2 * sigma12 + c2)) / ((mu1_sq + mu2_sq + c1) * (sigma1_sq + sigma2_sq + c2))
     return ssim_map.mean(dim=(-3, -2, -1))
+
+
+def temporal_delta_error(pred_seq: torch.Tensor, target_seq: torch.Tensor) -> torch.Tensor:
+    """
+    Mean absolute error of first temporal differences.
+    pred_seq/target_seq: [B,S,C,H,W].
+    """
+    if pred_seq.shape[1] < 2:
+        return pred_seq.new_zeros(())
+    pred_delta = pred_seq[:, 1:] - pred_seq[:, :-1]
+    target_delta = target_seq[:, 1:] - target_seq[:, :-1]
+    return torch.mean(torch.abs(pred_delta - target_delta))
+
+
+def temporal_acceleration_error(pred_seq: torch.Tensor, target_seq: torch.Tensor) -> torch.Tensor:
+    """
+    Mean absolute error of second temporal differences.
+    pred_seq/target_seq: [B,S,C,H,W].
+    """
+    if pred_seq.shape[1] < 3:
+        return pred_seq.new_zeros(())
+    pred_acc = pred_seq[:, 2:] - 2.0 * pred_seq[:, 1:-1] + pred_seq[:, :-2]
+    target_acc = target_seq[:, 2:] - 2.0 * target_seq[:, 1:-1] + target_seq[:, :-2]
+    return torch.mean(torch.abs(pred_acc - target_acc))

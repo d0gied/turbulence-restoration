@@ -40,6 +40,12 @@ class TurbulenceConfig:
     @staticmethod
     def from_severity(severity: str) -> "TurbulenceConfig":
         presets = {
+            "very_weak": TurbulenceConfig(
+                max_displacement=(0.25, 2.0),
+                blur_sigma=(0.0, 0.5),
+                scintillation_strength=(0.0, 0.01),
+                temporal_scale=0.08,
+            ),
             "weak": TurbulenceConfig(
                 max_displacement=(2.0, 8.0),
                 blur_sigma=(0.0, 2.0),
